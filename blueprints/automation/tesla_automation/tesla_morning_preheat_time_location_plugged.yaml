@@ -1,9 +1,8 @@
-
 blueprint:
-  name: Tesla Morning Preheat (Time + Weekday, if Location=Home & Plugged-in)
+  name: Tesla Morning Preheat (Time + Weekday, if Zone=Target & Plugged-in)
   description: >
-    Starts Tesla climate preconditioning at a scheduled time and on selected weekdays,
-    only if the Tesla's device_tracker reports the Home zone AND the charger state is Connected.
+    Starts Tesla climate preconditioning at a scheduled time on selected weekdays,
+    only if the Tesla's device_tracker is in the configured target zone AND the charger state is Connected.
     Optional: outdoor temperature threshold, wake car first, set cabin setpoint, auto-stop after N minutes,
     and send a notification.
   domain: automation
@@ -29,11 +28,18 @@ blueprint:
     tesla_location_tracker:
       name: Tesla device tracker (location)
       description: >
-        Select the Tesla device_tracker entity that reports zones (state must be 'home' for your Home zone).
+        Select the Tesla device_tracker entity that reports zones (its state equals the zone name).
       selector:
         entity:
           filter:
             - domain: device_tracker
+
+    target_zone:
+      name: Target zone name
+      description: Zone name to match (e.g., home, garage, work)
+      default: "home"
+      selector:
+        text: {}
 
     # --- Plugged-in (MANDATORY) ---
     charger_state_sensor:
@@ -139,7 +145,7 @@ blueprint:
           min: 0
           max: 180
           step: 5
-      unit_of_measurement: "min"
+          unit_of_measurement: "min"
 
     # --- Notification (optional) ---
     notify_service:
@@ -154,6 +160,7 @@ mode: single
 # --- Variables for template conditions/actions ---
 variables:
   v_presence: !input tesla_location_tracker
+  target_zone: !input target_zone
   v_charger: !input charger_state_sensor
   v_outdoor: !input outdoor_temp_sensor
   v_thresh: !input temp_threshold_c
@@ -178,10 +185,10 @@ condition:
   - condition: time
     weekday: !input weekdays
 
-  # Require Tesla to be in Home zone
-  - condition: state
-    entity_id: !input tesla_location_tracker
-    state: "home"
+  # Require Tesla to be in the target zone (configurable)
+  - condition: template
+    value_template: >
+      {{ states(v_presence) == target_zone }}
 
   # Require charger connected (MANDATORY)
   - condition: state
@@ -207,11 +214,11 @@ action:
       - service: button.press
         target:
           entity_id: !input wake_button
-      - alias: "Wait for Tesla to remain in home zone"
+      - alias: "Wait for Tesla to be in the target zone"
         wait_for_trigger:
           - platform: state
             entity_id: !input tesla_location_tracker
-            to: "home"
+            to: !input target_zone
         timeout:
           seconds: !input wake_wait
         continue_on_timeout: true
@@ -252,3 +259,9 @@ action:
         data:
           title: "Tesla Preheat"
           message: >
+            Preconditioning started at {{ now().strftime('%H:%M') }}.
+            Zone: {{ target_zone }}.
+            Charger: {{ states(v_charger) }}.
+            {% if v_outdoor|length > 0 %}
+            Outside: {{ states(v_outdoor) }}°C.
+            {% endif %}
