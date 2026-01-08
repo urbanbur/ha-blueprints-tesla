@@ -1,4 +1,3 @@
-
 blueprint:
   name: Tesla Morning Preheat (Time + Weekday, if Zone=Target & Plugged-in)
   description: >
