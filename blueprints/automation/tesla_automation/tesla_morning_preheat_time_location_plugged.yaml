@@ -1,3 +1,4 @@
+
 blueprint:
   name: Tesla Morning Preheat (Time + Weekday, if Zone=Target & Plugged-in)
   description: >
@@ -220,7 +221,7 @@ action:
             entity_id: !input tesla_location_tracker
             to: !input target_zone
         timeout:
-          seconds: !input wake_wait
+          seconds: !input wake_wait_seconds
         continue_on_timeout: true
 
   - alias: "Start climate preconditioning"
