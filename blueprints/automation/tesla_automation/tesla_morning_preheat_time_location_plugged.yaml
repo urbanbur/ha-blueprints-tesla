@@ -1,4 +1,4 @@
-blueprint:
+blueprint: 
   name: Tesla Morning Preheat
   description: >
     Starts Tesla climate preconditioning at a scheduled time on selected weekdays,
