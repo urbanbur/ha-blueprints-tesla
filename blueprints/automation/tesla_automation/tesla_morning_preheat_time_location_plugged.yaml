@@ -1,34 +1,28 @@
 blueprint:
-  name: Tesla Morning Preheat (Time + Weekday, if Zone=Target & Plugged-in)
+  name: Tesla Morning Preheat (Stop on Cable Disconnect or Timeout)
   description: >
     Starts Tesla climate preconditioning at a scheduled time on selected weekdays,
-    only if the Tesla's device_tracker is in the configured target zone AND the charger state is Connected.
-    Optional: outdoor temperature threshold, wake car first, set cabin setpoint, auto-stop after N minutes,
-    and send a notification.
+    only if the Tesla is in the target zone AND charger is Connected.
+    Snapshots original climate state and restores it when:
+      • Cable is unplugged before timeout, OR
+      • Timeout expires.
   domain: automation
 
   input:
-    # --- Trigger (time + weekday) ---
     preheat_time:
       name: Preheat time
-      description: Time of day to start the routine
-      selector:
-        time: {}
+      selector: { time: {} }
 
     weekdays:
       name: Days to run
-      description: Restrict to selected weekdays
       default: [mon, tue, wed, thu, fri]
       selector:
         select:
           options: [mon, tue, wed, thu, fri, sat, sun]
           multiple: true
 
-    # --- Presence via Tesla location (zone) ---
     tesla_location_tracker:
-      name: Tesla device tracker (location)
-      description: >
-        Select the Tesla device_tracker entity that reports zones (its state equals the zone name).
+      name: Tesla device tracker
       selector:
         entity:
           filter:
@@ -36,90 +30,20 @@ blueprint:
 
     target_zone:
       name: Target zone name
-      description: Zone name to match (e.g., home, garage, work)
-      default: "home"
-      selector:
-        text: {}
+      default: "Home"
+      selector: { text: {} }
 
-    # --- Plugged-in (MANDATORY) ---
     charger_state_sensor:
-      name: Charger state sensor (MANDATORY)
-      description: Sensor showing 'Connected' when the cable is plugged (e.g., sensor.tesla_charger_state)
+      name: Charger state sensor
+      description: Shows 'Connected' when cable is plugged
       selector:
         entity:
           filter:
             - domain: sensor
-
-    # --- Temperature filter (optional) ---
-    outdoor_temp_sensor:
-      name: Outdoor temperature sensor (optional)
-      description: Sensor providing outdoor temperature in °C
-      default: ""
-      selector:
-        entity:
-          filter:
-            - domain: sensor
-
-    temp_threshold_c:
-      name: Only preheat when outdoor temp is below (°C)
-      description: If a sensor is set, require temperature below this value
-      default: 5
-      selector:
-        number:
-          min: -30
-          max: 30
-          step: 1
-          unit_of_measurement: "°C"
-
-    # --- Tesla commands/entities ---
-    wake_button:
-      name: Tesla wake-up button (optional)
-      description: e.g., button.wake_up (from Tesla Fleet integration)
-      default: ""
-      selector:
-        entity:
-          filter:
-            - domain: button
-
-    perform_wake_first:
-      name: Wake car first?
-      description: If provided, press wake before starting preconditioning
-      default: true
-      selector:
-        boolean: {}
-
-    wake_wait_seconds:
-      name: Wake wait timeout (seconds)
-      description: How long to wait after wake for presence/online
-      default: 60
-      selector:
-        number:
-          min: 10
-          max: 300
-          step: 5
-          unit_of_measurement: "s"
-
-    climate_start_button:
-      name: Tesla climate start button
-      description: e.g., button.auto_conditioning_start
-      selector:
-        entity:
-          filter:
-            - domain: button
-
-    climate_stop_button:
-      name: Tesla climate stop button (optional)
-      description: e.g., button.auto_conditioning_stop
-      default: ""
-      selector:
-        entity:
-          filter:
-            - domain: button
 
     climate_entity:
-      name: Tesla climate entity (optional)
-      description: e.g., climate.<your_vehicle> (to set cabin setpoint)
-      default: ""
+      name: Tesla climate entity
+      description: e.g., climate.<your_vehicle>
       selector:
         entity:
           filter:
@@ -127,7 +51,6 @@ blueprint:
 
     cabin_setpoint:
       name: Cabin temperature setpoint (°C)
-      description: Target setpoint after starting climate (if climate_entity provided)
       default: 21
       selector:
         number:
@@ -138,130 +61,63 @@ blueprint:
 
     stop_after_minutes:
       name: Stop climate after (minutes)
-      description: 0 = don't auto-stop (requires climate_stop_button if >0)
-      default: 0
+      default: 30
       selector:
         number:
-          min: 0
+          min: 5
           max: 180
           step: 5
           unit_of_measurement: "min"
 
-    # --- Notification (optional) ---
-    notify_service:
-      name: Notify service (optional)
-      description: e.g., notify.mobile_app_your_phone
-      default: ""
-      selector:
-        text: {}
-
 mode: single
 
-# --- Variables for template conditions/actions ---
 variables:
   v_presence: !input tesla_location_tracker
   target_zone: !input target_zone
   v_charger: !input charger_state_sensor
-  v_outdoor: !input outdoor_temp_sensor
-  v_thresh: !input temp_threshold_c
-  v_wake_btn: !input wake_button
-  v_do_wake: !input perform_wake_first
-  v_wake_wait: !input wake_wait_seconds
-  v_start_btn: !input climate_start_button
-  v_stop_btn: !input climate_stop_button
   v_climate: !input climate_entity
   v_setpoint: !input cabin_setpoint
   v_stop_after: !input stop_after_minutes
-  v_notify: !input notify_service
 
-# --- Trigger (time only) ---
 trigger:
   - platform: time
     at: !input preheat_time
 
-# --- Conditions ---
 condition:
-  # Restrict to selected weekdays
   - condition: time
     weekday: !input weekdays
-
-  # Require Tesla to be in the target zone (configurable)
   - condition: template
-    value_template: >
-      {{ states(v_presence) == target_zone }}
-
-  # Require charger connected (MANDATORY)
+    value_template: "{{ states(v_presence) == target_zone }}"
   - condition: state
     entity_id: !input charger_state_sensor
     state: "Connected"
 
-  # Optional: outdoor temperature below threshold
-  - condition: template
-    value_template: >
-      {% if v_outdoor|length == 0 %}
-        true
-      {% else %}
-        {{ (states(v_outdoor)|float(-100)) < v_thresh }}
-      {% endif %}
-
-# --- Actions ---
 action:
-  - alias: "Optionally wake the car first"
-    if:
-      - condition: template
-        value_template: "{{ v_do_wake and v_wake_btn|length > 0 }}"
-    then:
-      - service: button.press
-        target:
-          entity_id: !input wake_button
-      - alias: "Wait for Tesla to be in the target zone"
-        wait_for_trigger:
-          - platform: state
-            entity_id: !input tesla_location_tracker
-            to: !input target_zone
-        timeout:
-          seconds: !input wake_wait_seconds
-        continue_on_timeout: true
+  # Snapshot original climate state
+  - service: scene.create
+    data:
+      scene_id: tesla_preheat_before
+      snapshot_entities:
+        - !input climate_entity
 
-  - alias: "Start climate preconditioning"
-    service: button.press
-    target:
-      entity_id: !input climate_start_button
+  # Start climate and set setpoint
+  - service: climate.turn_on
+    target: { entity_id: !input climate_entity }
 
-  - alias: "Optional: set cabin setpoint"
-    if:
-      - condition: template
-        value_template: "{{ v_climate|length > 0 }}"
-    then:
-      - service: climate.set_temperature
-        target:
-          entity_id: !input climate_entity
-        data:
-          temperature: !input cabin_setpoint
+  - service: climate.set_temperature
+    target: { entity_id: !input climate_entity }
+    data:
+      temperature: !input cabin_setpoint
 
-  - alias: "Optional: stop climate after N minutes"
-    if:
-      - condition: template
-        value_template: "{{ v_stop_after|int > 0 and v_stop_btn|length > 0 }}"
-    then:
-      - delay:
-          minutes: !input stop_after_minutes
-      - service: button.press
-        target:
-          entity_id: !input climate_stop_button
+  # Wait for cable disconnect OR timeout
+  - wait_for_trigger:
+      - platform: state
+        entity_id: !input charger_state_sensor
+        from: "Connected"
+    timeout:
+      minutes: !input stop_after_minutes
+    continue_on_timeout: true
 
-  - alias: "Optional: notify"
-    if:
-      - condition: template
-        value_template: "{{ v_notify|length > 0 }}"
-    then:
-      - service: "{{ v_notify }}"
-        data:
-          title: "Tesla Preheat"
-          message: >
-            Preconditioning started at {{ now().strftime('%H:%M') }}.
-            Zone: {{ target_zone }}.
-            Charger: {{ states(v_charger) }}.
-            {% if v_outdoor|length > 0 %}
-            Outside: {{ states(v_outdoor) }}°C.
-            {% endif %}
+  # Restore original climate state
+  - service: scene.turn_on
+    target: { entity_id: scene.tesla_preheat_before }
