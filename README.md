@@ -42,12 +42,10 @@ It **snapshots the original climate state** before preheating and **restores it*
 5. Restores original climate state via `scene.turn_on`.
 
 ## Installation
-1. Download the blueprint file:
-   - `tesla_preheat_disconnect_timeout_Home_default.yaml`
-2. In Home Assistant:
+1. In Home Assistant:
    - Go to **Settings → Blueprints → Import Blueprint**.
-   - Upload the file.
-3. Create an automation from the blueprint and fill in your entity IDs.
+   - Upload the file `https://raw.githubusercontent.com/urbanbur/ha-blueprints-tesla/main/blueprints/automation/tesla_automation/tesla_morning_preheat_time_location_plugged.yaml`
+2. Create an automation from the blueprint and fill in your entity IDs.
 
 ## Best Practices
 - Use a Tesla integration that exposes a **`climate`** entity (e.g., Tesla Fleet, Tessie, Teslemetry).
