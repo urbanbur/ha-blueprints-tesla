@@ -1,150 +1,63 @@
-# Home Assistant Blueprints – Tesla Automations
 
-**Namespace:** `tesla_automation`  
-**Repository:** `urbanbur/ha-blueprints-tesla`
+# Tesla Morning Preheat (Stop on Cable Disconnect or Timeout)
 
----
+## Overview
+This Home Assistant blueprint automates **Tesla climate preconditioning** on weekday mornings. It starts the HVAC at a scheduled time **only if**:
+- The car is in the specified zone (default: `Home`).
+- The charging cable is **Connected**.
 
-## 📌 Overview
+It **snapshots the original climate state** before preheating and **restores it** when:
+- The cable is unplugged before the countdown ends, **or**
+- The countdown expires.
 
-This repository hosts **Home Assistant blueprints** for automating Tesla vehicles using the **Tesla Fleet** integration.
+## Features
+- **Scheduled start**: Runs at a chosen time on selected weekdays.
+- **Zone check**: Ensures the car is at `Home` (or your chosen zone).
+- **Charger check**: Requires charger state = `Connected`.
+- **Climate restore**: Uses `scene.create` and `scene.turn_on` to revert to the original HVAC mode and setpoint.
+- **Timeout**: Stops and restores after `stop_after_minutes`.
 
-### ✅ Included Blueprint
-**Tesla Morning Preheat (Time + Weekday, if Zone=Target & Plugged-in)**  
-Automatically starts **Tesla climate preconditioning** at a scheduled time on selected weekdays **only if**:
-- The Tesla’s **location (device_tracker)** equals a **configurable target zone** (default: `home`)
-- The **charger is connected** (`Connected` state)
+## Inputs
+| Input | Description | Default |
+|---|---|---|
+| `preheat_time` | Time to start preheating | — |
+| `weekdays` | Days to run | Mon–Fri |
+| `tesla_location_tracker` | Device tracker for Tesla (reports zone name) | — |
+| `target_zone` | Zone name to match | `Home` |
+| `charger_state_sensor` | Sensor showing `Connected` when plugged | — |
+| `climate_entity` | Tesla climate entity (e.g., `climate.model_3`) | — |
+| `cabin_setpoint` | Target cabin temperature (°C) | 21 |
+| `stop_after_minutes` | Countdown before restoring climate | 30 |
 
-**Optional features**
-- Wake the car first (if asleep)
-- Run only when the **outdoor temperature is below** a set threshold
-- Set a **cabin temperature setpoint**
-- **Auto-stop** climate after N minutes
-- Send a **notification**
+## How It Works
+1. At `preheat_time`, checks:
+   - Day is in `weekdays`.
+   - Car is in `target_zone`.
+   - Charger state = `Connected`.
+2. Snapshots current climate state.
+3. Turns on climate and sets `cabin_setpoint`.
+4. Waits for **either**:
+   - Charger state changes away from `Connected` (cable unplugged), **or**
+   - Timeout expires.
+5. Restores original climate state via `scene.turn_on`.
 
----
+## Installation
+1. Download the blueprint file:
+   - `tesla_preheat_disconnect_timeout_Home_default.yaml`
+2. In Home Assistant:
+   - Go to **Settings → Blueprints → Import Blueprint**.
+   - Upload the file.
+3. Create an automation from the blueprint and fill in your entity IDs.
 
-## 🔗 Import into Home Assistant
+## Best Practices
+- Use a Tesla integration that exposes a **`climate`** entity (e.g., Tesla Fleet, Tessie, Teslemetry).
+- Confirm that your **charger state sensor** reports the string `Connected` when the cable is plugged.
+- If you run multiple Teslas, create separate automations per vehicle.
 
-1. Open **Settings → Automations & Scenes → Blueprints → Import Blueprint**.
-2. Paste this RAW URL:
+## Troubleshooting
+- **Automation doesn’t start**: Verify the device tracker shows `Home` (or your `target_zone`) and charger sensor is `Connected`.
+- **Restore fails**: Ensure `scene.create` ran successfully; you should see a temporary `scene.tesla_preheat_before` entity.
+- **Entity IDs**: Use **Developer Tools → States** to find exact entity IDs.
 
-```
-https://raw.githubusercontent.com/urbanbur/ha-blueprints-tesla/main/blueprints/automation/tesla_automation/tesla_morning_preheat_time_location_plugged.yaml
-```
-
-3. Click **Import** and create an automation from the blueprint.
-
----
-
-## 🛠 Requirements
-
-- **Home Assistant** (2024.12+ recommended)
-- **Tesla Fleet** integration configured (OAuth + virtual key enrolled)
-- Entities available in HA:
-  - `device_tracker.<your_tesla>` — **state equals zone name** (e.g., `home`, `work`, `garage`)
-  - `sensor.tesla_charger_state` — must read `Connected`
-  - `button.auto_conditioning_start` — starts climate preconditioning
-
-**Optional entities**
-- `button.wake_up` — wakes the car if asleep
-- `button.auto_conditioning_stop` — stops climate
-- `climate.<your_tesla>` — climate entity to set a cabin temperature
-- `sensor.<outdoor_temperature>` — any outside temp sensor in °C
-
-> **Tip:** Check **Settings → Areas & Zones → Zones** to confirm the exact **zone names** you intend to use.
-
----
-
-## ⚙️ Inputs (explained)
-
-| Input                          | Description                                                                 |
-|-------------------------------|-----------------------------------------------------------------------------|
-| **Preheat time**             | Time-of-day trigger (e.g., `07:00`)                                        |
-| **Days to run**              | Weekday selection                                                          |
-| **Tesla device tracker**     | `device_tracker` entity for Tesla (state = zone name)                      |
-| **Target zone name**         | Zone name to match (default: `home`)                                       |
-| **Charger state sensor**     | Must equal `Connected`                                                     |
-| **Outdoor temp sensor**      | Optional sensor for outside temperature                                    |
-| **Temp threshold (°C)**      | Only run if outdoor temp is below this value                               |
-| **Wake button**              | Optional button to wake the car before starting                            |
-| **Perform wake first**       | Boolean: wake car before preconditioning                                   |
-| **Wake wait timeout (s)**    | How long to wait after wake for car to confirm presence                    |
-| **Climate start button**     | Button to start climate preconditioning                                    |
-| **Climate stop button**      | Optional button to stop climate after N minutes                            |
-| **Climate entity**           | Optional climate entity to set cabin temperature                           |
-| **Cabin setpoint (°C)**      | Desired cabin temperature                                                  |
-| **Stop after (minutes)**     | Auto-stop climate after this duration (requires stop button)               |
-| **Notify service**           | Optional notification service (e.g., `notify.mobile_app_my_phone`)         |
-
----
-
-## ✅ Example Use Case
-
-- **Goal:** Warm up your Tesla at 07:00 on weekdays when it’s cold.
-- **Conditions:** Car is at home, plugged in, outdoor temp < 5 °C.
-- **Actions:** Wake car → start climate → set cabin to 21 °C → stop after 30 minutes → send notification.
-
----
-
-## 🔍 How It Works
-
-1. **Trigger:** Time + weekday.
-2. **Conditions:**  
-   - Tesla location = `target_zone` (default `home`)  
-   - Charger state = `Connected`  
-   - Optional: outdoor temp below threshold  
-3. **Actions:**  
-   - Optionally wake the car  
-   - Start climate preconditioning  
-   - Optionally set cabin temperature  
-   - Optionally auto-stop after N minutes  
-   - Optionally notify  
-
----
-
-## 🧪 Troubleshooting
-
-- **Automation didn’t run:**  
-  - Confirm weekday selection includes today.  
-  - Check Tesla tracker state matches `target_zone`.  
-  - Ensure charger state = `Connected`.  
-  - Verify outdoor temp threshold if used.
-
-- **Wake didn’t work:**  
-  - Confirm `button.wake_up` exists and works via Developer Tools → Services.  
-  - Increase wake wait timeout to 90–120 s if needed.
-
----
-
-## 🗂 Repository Layout
-
-```
-urbanbur/ha-blueprints-tesla
-└─ blueprints/
-   └─ automation/
-      └─ tesla_automation/
-         └─ tesla_morning_preheat_time_location_plugged.yaml
-```
-
----
-
-## 📜 License
-
-MIT License – see [LICENSE](LICENSE) for details.
-
----
-
-## 🔗 Quick Import Link
-
-```
-https://raw.githubusercontent.com/urbanbur/ha-blueprints-tesla/main/blueprints/automation/tesla_automation/tesla_morning_preheat_time_location_plugged.yaml
-```
-
----
-
-## 💡 Notes
-
-- This blueprint leverages the **Tesla Fleet** integration’s entities (e.g., `button.auto_conditioning_start`, `button.wake_up`) and the `device_tracker` **zone** reporting.  
-- For consistent results on cold mornings, consider enabling **wake** first.  
-- Keep the `tesla_automation` namespace for future Tesla blueprints (arrival preheat, smart departure, charge windows, sentry mode control, etc.).
+## License
+You may use and modify this blueprint for personal and educational purposes.
