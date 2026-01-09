@@ -1,11 +1,12 @@
+
 blueprint:
-  name: Tesla Morning Preheat (Stop on Cable Disconnect or Timeout)
+  name: Tesla Morning Preheat (Final: Binary Cable Sensor, Snapshot & Restore)
   description: >
     Starts Tesla climate preconditioning at a scheduled time on selected weekdays,
-    only if the Tesla is in the target zone AND charger is Connected.
+    only if the Tesla is in the target zone AND the charge cable binary sensor is ON (connected).
     Snapshots original climate state and restores it when:
-      • Cable is unplugged before timeout, OR
-      • Timeout expires.
+      • The cable is unplugged (binary sensor goes OFF) before timeout, OR
+      • The countdown timeout expires.
   domain: automation
 
   input:
@@ -22,7 +23,7 @@ blueprint:
           multiple: true
 
     tesla_location_tracker:
-      name: Tesla device tracker
+      name: Tesla device tracker (reports zone as state)
       selector:
         entity:
           filter:
@@ -33,16 +34,15 @@ blueprint:
       default: "Home"
       selector: { text: {} }
 
-    charger_state_sensor:
-      name: Charger state sensor
-      description: Shows 'Connected' when cable is plugged
+    charge_cable_binary_sensor:
+      name: Charge cable binary sensor (ON=Connected, OFF=Disconnected)
       selector:
         entity:
           filter:
-            - domain: sensor
+            - domain: binary_sensor
 
     climate_entity:
-      name: Tesla climate entity
+      name: Tesla climate entity (REQUIRED)
       description: e.g., climate.<your_vehicle>
       selector:
         entity:
@@ -61,10 +61,11 @@ blueprint:
 
     stop_after_minutes:
       name: Stop climate after (minutes)
+      description: Countdown before restoring climate; set 0 to disable timer (still restores on cable unplug)
       default: 30
       selector:
         number:
-          min: 5
+          min: 0
           max: 180
           step: 5
           unit_of_measurement: "min"
@@ -74,7 +75,7 @@ mode: single
 variables:
   v_presence: !input tesla_location_tracker
   target_zone: !input target_zone
-  v_charger: !input charger_state_sensor
+  v_cable: !input charge_cable_binary_sensor
   v_climate: !input climate_entity
   v_setpoint: !input cabin_setpoint
   v_stop_after: !input stop_after_minutes
@@ -89,35 +90,60 @@ condition:
   - condition: template
     value_template: "{{ states(v_presence) == target_zone }}"
   - condition: state
-    entity_id: !input charger_state_sensor
-    state: "Connected"
+    entity_id: !input charge_cable_binary_sensor
+    state: "on"   # ON means the cable is connected
 
 action:
-  # Snapshot original climate state
-  - service: scene.create
+  # Snapshot original climate state for precise restore
+  - alias: "Snapshot original climate"
+    service: scene.create
     data:
       scene_id: tesla_preheat_before
       snapshot_entities:
         - !input climate_entity
 
   # Start climate and set setpoint
-  - service: climate.turn_on
-    target: { entity_id: !input climate_entity }
+  - alias: "Start climate"
+    service: climate.turn_on
+    target:
+      entity_id: !input climate_entity
 
-  - service: climate.set_temperature
-    target: { entity_id: !input climate_entity }
+  - alias: "Set cabin setpoint"
+    service: climate.set_temperature
+    target:
+      entity_id: !input climate_entity
     data:
       temperature: !input cabin_setpoint
 
-  # Wait for cable disconnect OR timeout
-  - wait_for_trigger:
-      - platform: state
-        entity_id: !input charger_state_sensor
-        from: "Connected"
-    timeout:
-      minutes: !input stop_after_minutes
-    continue_on_timeout: true
+  # --- Wait for cable unplug OR timeout ---
+  - alias: "Wait for unplug or timeout"
+    choose:
+      - conditions: "{{ v_stop_after|int > 0 }}"
+        sequence:
+          - wait_for_trigger:
+              - platform: state
+                entity_id: !input charge_cable_binary_sensor
+                from: "on"
+                to: "off"
+            timeout:
+              minutes: !input stop_after_minutes
+            continue_on_timeout: true
 
-  # Restore original climate state
-  - service: scene.turn_on
-    target: { entity_id: scene.tesla_preheat_before }
+          # Restore on either unplug or timeout
+          - alias: "Restore original climate"
+            service: scene.turn_on
+            target:
+              entity_id: scene.tesla_preheat_before
+    default:
+      # No timer: just wait for unplug
+      - wait_for_trigger:
+          - platform: state
+            entity_id: !input charge_cable_binary_sensor
+            from: "on"
+            to: "off"
+        continue_on_timeout: false
+
+      - alias: "Restore original climate"
+        service: scene.turn_on
+        target:
+          entity_id: scene.tesla_preheat_before
