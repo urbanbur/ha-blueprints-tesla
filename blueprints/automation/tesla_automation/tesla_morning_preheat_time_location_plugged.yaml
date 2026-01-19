@@ -90,7 +90,7 @@ condition:
     value_template: "{{ states(v_presence) == target_zone }}"
   - condition: state
     entity_id: !input charge_cable_binary_sensor
-    state: "on"   # ON means the cable is connected
+    state: "Connected"   # ON means the cable is connected
 
 action:
   # Snapshot original climate state for precise restore
